@@ -1,5 +1,6 @@
 from scipy import signal
 from scipy import stats
+from scipy import integrate
 from scipy import fft
 import numpy as np
 
@@ -94,8 +95,8 @@ def pitch_curve_generation(tracks):
     sigma = np.random.normal(0, 1, 1)
 
     #equation
-    inverse_part = np.linalg.inv(-1*R_diagonal + np.matmul(np.matmul(M.tranpose(), np.linalg.inv(N_diagonal)), M) + sigma*sigma*np.linalg.inv(c_p))
-    second_part = np.matmul(tracks.transpose(), vect_r_max)+np.matmul(np.matmul(M.transpose(),np.linalg.inv(N_diagonal)), np.matmul(tracks,vect_n))
+    inverse_part = np.linalg.inv(R_diagonal - np.matmul(np.matmul(M.transpose(), np.linalg.inv(N_diagonal)), M) + sigma*sigma*np.linalg.inv(c_p))
+    second_part = np.matmul(tracks.transpose(), vect_r_max.transpose())-np.matmul(np.matmul(M.transpose(),np.linalg.inv(N_diagonal)), np.matmul(tracks,vect_n.transpose()))
     p = np.matmul(inverse_part, second_part)
 
     #equation
@@ -109,12 +110,12 @@ def resampling(p,sr,degraded_signal):
     M=256
     #sampling rate
     T=sr
-
+    tau = integrate.cumtrapz(p)
     for n in len(degraded_signal):
         #generate the variables needed
         T_o = T/p[n]
         alpha = min([1, T_o / T])
-        tau = 0
+        tau_n= tau[n]
         #use the 2M+1 closest samples
         #account for edge cases of starting and ending
         if n-M/2 < 0:
@@ -129,8 +130,8 @@ def resampling(p,sr,degraded_signal):
         sample = 0
         for m in range(start,end):
             # windowing function: (m*T_o-tau)
-            w = signal.windows.hamming(m * T_o - tau)
-            sinc_val = np.sinc(alpha * (m * T_o - tau))
+            w = signal.windows.hamming(m * T_o - tau_n)
+            sinc_val = np.sinc(alpha * (m * T_o - tau_n))
             x_w = degraded_signal[(n - m) * T_o]
             #this might need to be changed
             result = w*sinc_val*x_w
