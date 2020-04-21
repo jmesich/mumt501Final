@@ -5,102 +5,13 @@ import math
 from scipy.io import wavfile
 #import matplotlib.pyplot as plt
 import sys
-
-"""
-Description.
-"""
-
-def _wav2array(nchannels, sampwidth, data):
-    """
-    First function for reading a wav file.
-
-    All credits go to this link: https://gist.github.com/WarrenWeckesser/7461781
-    """
-
-    """data must be the string containing the bytes from the wav file."""
-
-    num_samples, remainder = divmod(len(data), sampwidth * nchannels)
-    if remainder > 0:
-        raise ValueError('The length of data is not a multiple of '
-                         'sampwidth * num_channels.')
-    if sampwidth > 4:
-        raise ValueError("sampwidth must not be greater than 4.")
-
-    if sampwidth == 3:
-        a = np.empty((num_samples, nchannels, 4), dtype=np.uint8)
-        raw_bytes = np.frombuffer(data, dtype=np.uint8)
-        a[:, :, :sampwidth] = raw_bytes.reshape(-1, nchannels, sampwidth)
-        a[:, :, sampwidth:] = (a[:, :, sampwidth - 1:sampwidth] >> 7) * 255
-        result = a.view('<i4').reshape(a.shape[:-1])
-    else:
-        # 8 bit samples are stored as unsigned ints; others as signed ints.
-        dt_char = 'u' if sampwidth == 1 else 'i'
-        a = np.frombuffer(data, dtype='<%s%d' % (dt_char, sampwidth))
-        result = a.reshape(-1, nchannels)
-
-    return result
+import wavio
 
 
-def readwav(file):
-    """
-    Second function for reading a wav file.
-
-    All credits go to this link: https://gist.github.com/WarrenWeckesser/7461781
-    """
-
-    """
-    Read a wav file.
-    Returns the frame rate, sample width (in bytes) and a numpy array
-    containing the data.
-    This function does not read compressed wav files.
-    """
-    wav = wave.open(file)
-    rate = wav.getframerate()
-    nchannels = wav.getnchannels()
-    sampwidth = wav.getsampwidth()
-    nframes = wav.getnframes()
-    data = wav.readframes(nframes)
-    wav.close()
-    array = _wav2array(nchannels, sampwidth, data)
-
-    return rate, sampwidth, array
-
-
-def writewav24(filename, rate, data):
-    """Create a 24 bit wav file.
-    data must be "array-like", either 1- or 2-dimensional.  If it is 2-d,
-    the rows are the frames (i.e. samples) and the columns are the channels.
-    The data is assumed to be signed, and the values are assumed to be
-    within the range of a 24 bit integer.  Floating point values are
-    converted to integers.  The data is not rescaled or normalized before
-    writing it to the file.
-    Example: Create a 3 second 440 Hz sine wave.
-    >>> rate = 22050  # samples per second
-    >>> T = 3         # sample duration (seconds)
-    >>> f = 440.0     # sound frequency (Hz)
-    >>> t = np.linspace(0, T, T*rate, endpoint=False)
-    >>> x = (2**23 - 1) * np.sin(2 * np.pi * f * t)
-    >>> writewav24("sine24.wav", rate, x)
-    """
-    a32 = np.asarray(data, dtype=np.int32)
-    if a32.ndim == 1:
-        # Convert to a 2D array with a single column.
-        a32.shape = a32.shape + (1,)
-    # By shifting first 0 bits, then 8, then 16, the resulting output
-    # is 24 bit little-endian.
-    a8 = (a32.reshape(a32.shape + (1,)) >> np.array([0, 8, 16])) & 255
-    wavdata = a8.astype(np.uint8).tostring()
-
-    w = wave.open(filename, 'wb')
-    w.setnchannels(a32.shape[1])
-    w.setsampwidth(3)
-    w.setframerate(rate)
-    w.writeframes(wavdata)
-    w.close()
-
-
-# Return a Hamming window of length M
 def window(M):
+    """
+    Function used to return a Hamming window of leangth M.
+    """
     w = np.zeros(M)
 
     for x in range(M):
@@ -151,11 +62,14 @@ def framing(signal, Nh, Nw):
     return frames
 
 
-#Return the dot product between vectors x and y
 def dot(x, i_minx, i_maxx, y, i_miny, i_maxy):
-    N = 0
+    """
+    Note: this version of the dot product was adapted from the authors' methodology.
+
+    It does not follow standard dot product formulation, but is what they use to calculate
+    the correlation vector for AR parameter estimation.
+    """
     value = 0
-    i = 0
     N = i_maxx - i_minx + 1
 
     for i in range(0, N, 1):
@@ -169,15 +83,9 @@ def levinson_devin(signal, p, Nw):
     Levinson-Durbin algorithm for estimating AR parameters.
     """
 
-    # Calculate input first
+    # Calculate correlation vector first
     R = np.zeros(p + 1)
     for i in range(0, p + 1, 1):
-        """
-        v = 0.0
-        for j in range(i, Nw, 1):
-        v = v + signal[j] * signal[j - 1]
-        R[i] = v / Nw
-        """
         R[i] = dot(signal, i, Nw - 1, signal, 0, Nw - i - 1) / Nw
 
     # Allocate vectors
@@ -194,7 +102,6 @@ def levinson_devin(signal, p, Nw):
         return a, a_old, var
 
     a_old[0] = -(R[1] / R[0])
-
     a[0] = a_old[0]
     var = (1 - a[0] * a[0]) * R[0]
 
@@ -205,25 +112,26 @@ def levinson_devin(signal, p, Nw):
         for j in range(0, l, 1):
             s = s + a_old[j] * R[l - j]
 
+        # Check for NaN's, if a NaN is present, AR parameters are not valid!
         if (math.isclose(var, 0.0, rel_tol=1e-09, abs_tol=0.0)):
             a_old[:] = float('nan')
             a[:] = float('nan')
             var = 0.
             return a, a_old, var
         
-        #else:
         k = (R[l + 1] + s) / var
         
         a[l] = -k
 
-        var = (1 - a[l] * a[l]) * var
+        var = (1 - k * k) * var
 
-        for j in range(l - 1, -1, -1):
-            a[j] = a_old[j] + a[l] * a_old[l - j - 1]
+        for j in range(0, l, 1):
+            a[j] = a_old[j] - k * a_old[l - j - 1]
 
         for j in range(0, l + 1, 1):
             a_old[j] = a[j]
         
+    # Add parameter 1 at start of AR params and add rest
     a[0] = 1.0
     for j in range(0, p, 1):
         a[j + 1] = a_old[j]
@@ -235,7 +143,7 @@ def levinson_devin(signal, p, Nw):
 
 def AR_parameters(frames, p, Nw):
     """
-    Function used to estimate AR parameters.
+    Function used to estimate AR parameters for each frame.
     """
     dim = frames.shape[0]
     a_hat = np.zeros([dim, p + 1])
@@ -261,7 +169,9 @@ def criterion(frames, Nw, p, a_hat):
     Function for calculating the criterion for each frame.
     """
     dim = frames.shape[0]
-    t_interval = np.linspace(p, Nw - p - 1, Nw - p - p - 1, dtype=int)
+
+    # We only want the criterion defined s.t. x_(t-k) can be calculated!
+    t_interval = np.linspace(p, Nw - 1, Nw - p - 1, dtype=int)
 
     dt = np.zeros([dim, Nw], dtype=float)
 
@@ -273,21 +183,28 @@ def criterion(frames, Nw, p, a_hat):
             print("--> %i%%" %(percent))
             percent = percent + 10
 
+        # a vectors with a NaN should be ignored -- since their variance = 0, 
+        # they will not be processed
         if (float('nan') in a_hat[fr, :]):
-            dt[fr, :] = 0
+            dt[fr, :] = 0.
 
         else:
+            # Criterion calculated here.
             for t in t_interval:
                 s = 0
                 for k in range(0, p, 1):
                     s = s + a_hat[fr, k] * frames[fr, t - k]
-                temp = abs(frames[fr, t] + s)
+                # Use absolute value as that will be used for comparison
+                temp = abs(s)
                 dt[fr, t] = temp
 
     return dt
 
 
 def time_indices(dt, var_hat, K, b):
+    """
+    Function used to detect burst detections.
+    """
     dim = dt.shape[0]
 
     times = []
@@ -306,13 +223,29 @@ def time_indices(dt, var_hat, K, b):
 
                 while(t_f == True):
                     y = y + 1
-                    if (dt_temp[y] > K * var):
+                    if (y >= len(dt_temp)):
+                        t_f = False
+                    elif (dt_temp[y] > K * var):
                         continue
                     else:
                         t_f = False
 
-                if (y - x > b):
-                    t.append((x, y))
+                if (y - x >= b):
+                    if (t == []):
+                        t.append((x, y))
+                    else:
+                        (x_prev, y_prev) = t[-1]
+
+                        # Group bursts if close
+                        if (abs(x - y_prev) < b):
+                            t.pop()
+                            t.append((x_prev, y))
+                            print("%i %i %i %i" %(x_prev, y_prev, x, y))
+                            print(t[-1])
+                        
+                        # Just append if not.
+                        else:
+                            t.append((x, y))
 
                 x = y
 
@@ -324,53 +257,43 @@ def time_indices(dt, var_hat, K, b):
     return times
 
 
-def cholesky(A, x_mat, b, N):
+def cholesky(A, x_mat, N):
+    """
+    Cholesky decomposition as is explained in the paper.
+    """
     L = np.zeros([N, N])
     d = np.zeros(N)
-    y = np.zeros(N)
-
-    v = 0
+    v = np.zeros(N)
 
     for j in range(0, N, 1):
-        d[j] = A[j, j]
-        for i in range(0, j, 1):
-            d[j] -= L[j, i] * L[j, i] * d[i]
+        if (j > 0):
+            for i in range(0, j, 1):
+                v[i] = L[j, i] * d[i]
+            v[j] = A[j, j] - dot(L[j, :], 0, j - 1, v, 0, j - 1)
+
+        else:
+            v[j] = A[j, j]
+
+        d[j] = v[j]
+
+        if (v[j] == 0):
+            sys.exit("Singular Matrix!!!")
+
+        if (j < N - 1):
+            for i in range(j + 1, N, 1):
+                L[i, j] = (A[i, j] - dot(L[i, :], 0, j - 1, v, 0, j - 1)) / v[j]
         
-        if (math.isclose(d[j], 0.0, rel_tol=1e-09, abs_tol=0.0)):
-            print('Singular Matrix Error!')
-            return False
-
-        for i in range(j + 1, N, 1):
-            v = A[i, j]
-            for c in range(0, j, 1):
-                v = v - L[i, c] * L[j, c] * d[c]
-                L[i, j] = v / d[j]
-                L[j, i] = v / d[j]
-
-    for i in range(0, N, 1):
-        y[i] = b[i]
-        for j in range(0, i + 1, 1):
-            y[i] = y[i] - L[i, j] * y[j]
-
-    for i in range(N - 1, -1, -1):
-        x_mat[i] = y[i] / d[i]
-        for j in range(i, N, 1):
-            x_mat[i] = x_mat[i] - L[i, j] * x_mat[j]
+        L[j, j] = 1
 
     return x_mat
 
 
 def cholesky_reconstruct(frames, p, Nw, a_hat, times):
-    dim = frames.shape[0]
-
-    modulus = math.floor(dim / 10)
-    percent = 0
-
+    """
+    Reconstruct missing samples!
+    """
     index = 0
     for t in times:
-        """if ((index % modulus) == 0):
-        print("--> %i%%" %(percent))
-        percent = percent + 10"""
         print(index)
 
         if (t == []):
@@ -378,11 +301,10 @@ def cholesky_reconstruct(frames, p, Nw, a_hat, times):
             continue
 
         else:
-            ex = False
-
             temp_frame = frames[index]
             temp_a = a_hat[index]
 
+            # if a parameters are NaN,s, skip
             if (float('nan') in temp_a[:]):
                 index = index + 1
                 continue
@@ -396,6 +318,7 @@ def cholesky_reconstruct(frames, p, Nw, a_hat, times):
             values[0:p] = 0
             values[Nw - p:Nw] = 0
 
+            # Number of samples to reconstruct.
             l = int(np.sum(values))
 
             if (l > 0):
@@ -405,23 +328,27 @@ def cholesky_reconstruct(frames, p, Nw, a_hat, times):
                 d = np.zeros(l)
                 t = np.zeros(l, dtype=int)
 
+                # Indices of all missing samples.
                 temp_index = 0
                 for x in range(len(values)):
                     if (values[x] == 1):
                         t[temp_index] = x
                         temp_index = temp_index + 1
 
+                # Construct b vector for B
                 for i in range(0, p + 1, 1):
                     b[i] = 0.0
                     for j in range(i, p + 1, 1):
                         b[i] = b[i] + temp_a[j] * temp_a[j - i]
 
+                # Construct B vector.
                 for i in range(0, l, 1):
                     for j in range(i, l, 1):
                         if (abs(t[i] - t[j]) < p + 1):
                             B[i, j] = b[abs(t[i] - t[j])]
                             B[j, i] = b[abs(t[i] - t[j])]
 
+                # Construct -d vector.
                 for i in range(0, l, 1):
                     d[i] = 0
                     for j in range(-p, p + 1, 1):
@@ -430,14 +357,14 @@ def cholesky_reconstruct(frames, p, Nw, a_hat, times):
                         else:
                             d[i] = d[i] - b[abs(j)] * temp_frame[t[i] - j]
 
-                x_mat = np.zeros(l)
+                #x_mat = np.zeros(l)
 
-                #x_mat = cholesky(B, x_mat, d, l)
+                s_t = cholesky(B, d, l)
 
                 #if (x_mat_new == False):
                 #index = index + 1
                 #continue
-
+                """
                 L, D, perm = scipy.linalg.ldl(B, lower=True, hermitian=False, overwrite_a=True, check_finite=True)
                 #x_mat = scipy.linalg.ldl(B, lower=True, hermitian=True, overwrite_a=False, check_finite=True)
 
@@ -448,6 +375,7 @@ def cholesky_reconstruct(frames, p, Nw, a_hat, times):
                 D_x = np.matmul(D_inv, x_mat)
 
                 s_t = np.linalg.solve(L_t, D_x)
+                """
 
                 print(s_t.shape)
 
@@ -476,7 +404,18 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
     """
 
     # Read wav file
-    rate, sampwidth, arr = readwav(sound_file)
+    wv = wavio.read(sound_file)
+    rate = wv.rate
+    sampwidth = wv.sampwidth
+    #arr = wv.data
+    #rate, sampwidth, arr = wavio.read(sound_file)
+
+    wv_shape = wv.data.shape
+    arr = np.zeros(wv_shape)
+
+    for i in range(0, wv_shape[0], 1):
+        for j in range(0, wv_shape[1], 1):
+            arr[i, j] = wv.data[i, j]
 
     #arr = arr[20000:40000, :]
 
@@ -565,15 +504,15 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
 
             print("Done!")
 
-        new_arr[:, ch] = channel[:]
+        arr[:, ch] = channel[:]
 
-    return rate, new_arr
+    return arr, rate, sampwidth
 
 
 def main():
-    rate, data = remove_noise('vinyl-crackle_123bpm_B_minor.wav', 1.8, 20, 300, 2400, 1, 0.75)
+    data, rate, sampwidth = remove_noise('Test_Samples/sampling_101.wav', 2, 20, 302, 2416, 2, 0.75)
 
-    writewav24('restored_crackle.wav', rate, data)
+    wavio.write('restored_sampling_101.wav', data, rate, scale=None, sampwidth=sampwidth)
 
 
 main()
