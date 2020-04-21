@@ -66,6 +66,39 @@ def readwav(file):
     return rate, sampwidth, array
 
 
+def writewav24(filename, rate, data):
+    """Create a 24 bit wav file.
+    data must be "array-like", either 1- or 2-dimensional.  If it is 2-d,
+    the rows are the frames (i.e. samples) and the columns are the channels.
+    The data is assumed to be signed, and the values are assumed to be
+    within the range of a 24 bit integer.  Floating point values are
+    converted to integers.  The data is not rescaled or normalized before
+    writing it to the file.
+    Example: Create a 3 second 440 Hz sine wave.
+    >>> rate = 22050  # samples per second
+    >>> T = 3         # sample duration (seconds)
+    >>> f = 440.0     # sound frequency (Hz)
+    >>> t = np.linspace(0, T, T*rate, endpoint=False)
+    >>> x = (2**23 - 1) * np.sin(2 * np.pi * f * t)
+    >>> writewav24("sine24.wav", rate, x)
+    """
+    a32 = np.asarray(data, dtype=np.int32)
+    if a32.ndim == 1:
+        # Convert to a 2D array with a single column.
+        a32.shape = a32.shape + (1,)
+    # By shifting first 0 bits, then 8, then 16, the resulting output
+    # is 24 bit little-endian.
+    a8 = (a32.reshape(a32.shape + (1,)) >> np.array([0, 8, 16])) & 255
+    wavdata = a8.astype(np.uint8).tostring()
+
+    w = wave.open(filename, 'wb')
+    w.setnchannels(a32.shape[1])
+    w.setsampwidth(3)
+    w.setframerate(rate)
+    w.writeframes(wavdata)
+    w.close()
+
+
 # Return a Hamming window of length M
 def window(M):
     w = np.zeros(M)
@@ -208,7 +241,13 @@ def AR_parameters(frames, p, Nw):
     a_hat = np.zeros([dim, p + 1])
     var_hat = np.zeros(dim)
 
+    modulus = math.floor(dim / 10)
+    percent = 0
     for fr in range(dim):
+        if ((fr % modulus) == 0):
+            print("--> %i%%" %(percent))
+            percent = percent + 10
+
         frame = frames[fr]
         a, a_old, var = levinson_devin(frame, p, Nw) 
         a_hat[fr, :] = a
@@ -226,9 +265,17 @@ def criterion(frames, Nw, p, a_hat):
 
     dt = np.zeros([dim, Nw], dtype=float)
 
+    modulus = math.floor(dim / 10)
+    percent = 0
+
     for fr in range(dim):
+        if ((fr % modulus) == 0):
+            print("--> %i%%" %(percent))
+            percent = percent + 10
+
         if (float('nan') in a_hat[fr, :]):
             dt[fr, :] = 0
+
         else:
             for t in t_interval:
                 s = 0
@@ -314,9 +361,18 @@ def cholesky(A, x_mat, b, N):
 
 
 def cholesky_reconstruct(frames, p, Nw, a_hat, times):
+    dim = frames.shape[0]
+
+    modulus = math.floor(dim / 10)
+    percent = 0
 
     index = 0
     for t in times:
+        """if ((index % modulus) == 0):
+        print("--> %i%%" %(percent))
+        percent = percent + 10"""
+        print(index)
+
         if (t == []):
             index = index + 1
             continue
@@ -347,10 +403,13 @@ def cholesky_reconstruct(frames, p, Nw, a_hat, times):
                 b = np.zeros(p + 1)
                 B = np.zeros([l, l])
                 d = np.zeros(l)
+                t = np.zeros(l, dtype=int)
 
+                temp_index = 0
                 for x in range(len(values)):
                     if (values[x] == 1):
-                        values[x] = x
+                        t[temp_index] = x
+                        temp_index = temp_index + 1
 
                 for i in range(0, p + 1, 1):
                     b[i] = 0.0
@@ -359,32 +418,47 @@ def cholesky_reconstruct(frames, p, Nw, a_hat, times):
 
                 for i in range(0, l, 1):
                     for j in range(i, l, 1):
-                        if (abs(values[i] - values[j]) < p + 1):
-                            B[i, j] = b[abs(values[i] - values[j])]
-                            B[j, i] = b[abs(values[i] - values[j])]
+                        if (abs(t[i] - t[j]) < p + 1):
+                            B[i, j] = b[abs(t[i] - t[j])]
+                            B[j, i] = b[abs(t[i] - t[j])]
 
                 for i in range(0, l, 1):
                     d[i] = 0
                     for j in range(-p, p + 1, 1):
-                        if ((values[i] - j) in values):
+                        if ((t[i] - j) in t):
                             continue
                         else:
-                            d[i] = d[i] - b[abs(j)] * temp_frame[values[i] - j]
+                            d[i] = d[i] - b[abs(j)] * temp_frame[t[i] - j]
 
-                x_mat = np.zeros(Nw)
+                x_mat = np.zeros(l)
 
-                x_mat_new = cholesky(B, x_mat, d, l)
+                #x_mat = cholesky(B, x_mat, d, l)
 
-                if (x_mat_new == False):
-                    index = index + 1
-                    continue
+                #if (x_mat_new == False):
+                #index = index + 1
+                #continue
+
+                L, D, perm = scipy.linalg.ldl(B, lower=True, hermitian=False, overwrite_a=True, check_finite=True)
+                #x_mat = scipy.linalg.ldl(B, lower=True, hermitian=True, overwrite_a=False, check_finite=True)
+
+                x_mat = np.linalg.solve(L, d)
+
+                L_t = np.transpose(L)
+                D_inv = np.linalg.inv(D)
+                D_x = np.matmul(D_inv, x_mat)
+
+                s_t = np.linalg.solve(L_t, D_x)
+
+                print(s_t.shape)
+
+                #print(x_mat_new)
 
                 for c in range(l):
-                    temp_frame[values[c]] = x_mat_new[c]
+                    temp_frame[t[c]] = s_t[c]
 
-                frames[index] = temp_frame
+                frames[index, :] = temp_frame
 
-                index = index + 1
+            index = index + 1
 
     return frames
 
@@ -403,6 +477,10 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
 
     # Read wav file
     rate, sampwidth, arr = readwav(sound_file)
+
+    #arr = arr[20000:40000, :]
+
+    new_arr = np.zeros(arr.shape, dtype=float)
 
     # Number of channels and samples
     N = arr.shape[0]
@@ -426,10 +504,14 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
             """
             Algorithm starts here.
             """
+            print("--> Iteration %i" %(x))
+
             # Step 1: Pad the signal with zeroes
             print("--> Padding.")
 
             signal, p_l, upper = padding(channel, Nw, Nh, N)
+            print(p_l)
+            print(upper)
 
             # Step 2: Divide Signal into overlapping frames
             print("--> Dividing signal into overlapping frames.")
@@ -461,7 +543,7 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
 
             w = window(Nw)
 
-            for fr in frames.shape[0]:
+            for fr in range(frames.shape[0]):
                 frames[fr, :] = np.multiply(frames[fr, :], w)
 
             # Step 7: Add frames up again for new signal!
@@ -470,25 +552,28 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
             new_signal = np.zeros(p_l)
             index = 0
 
-            for fr in frames.shape[0]:
+            for fr in range(frames.shape[0]):
                 new_signal[index:index + Nw] = new_signal[index:index + Nw] + frames[fr, :]
                 index = index + Nh
 
-            channel = new_signal[Nw, p_l - upper]
+            print(new_signal.shape)
+            print(channel.shape)
+
+            channel = new_signal[Nw:p_l - upper - Nw]
+
+            print(channel.shape)
 
             print("Done!")
 
+        new_arr[:, ch] = channel[:]
+
+    return rate, new_arr
+
 
 def main():
-    #"""
-    remove_noise('vinyl-crackle_123bpm_B_minor.wav', 1.8, 20, 300, 2400, 1, 0.75)
-    #"""
-    """
-    signal = np.array([1, 2, 3, 4, 5, 4, 3, 2, 1, 0])
-    new = levinson_devin(signal, 2, 5)
-    print(new)
-    """
-    
+    rate, data = remove_noise('vinyl-crackle_123bpm_B_minor.wav', 1.8, 20, 300, 2400, 1, 0.75)
+
+    writewav24('restored_crackle.wav', rate, data)
 
 
 main()
