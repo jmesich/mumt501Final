@@ -1,11 +1,9 @@
 import scipy
 import scipy.linalg
 import scipy.signal
-#import wave
 import numpy as np
 import math
-#from scipy.io import wavfile
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import sys
 import wavio
 
@@ -107,7 +105,7 @@ def levinson_devin(signal, p, Nw):
 
     # Initialization
 
-    # Avoid NaN's
+    # Check for NaN's, if a NaN is present, AR parameters are not valid!
     if (math.isclose(R[0], 0.0, rel_tol=1e-09, abs_tol=0.0)):
         a_old[:] = float('nan')
         a[:] = float('nan')
@@ -207,6 +205,7 @@ def criterion(frames, Nw, p, a_hat):
                 s = 0
                 for k in range(0, p, 1):
                     s = s + a_hat[fr, k] * frames[fr, t - k]
+                
                 # Use absolute value as that will be used for comparison
                 temp = abs(s)
                 dt[fr, t] = temp
@@ -216,7 +215,7 @@ def criterion(frames, Nw, p, a_hat):
 
 def time_indices(dt, var_hat, K, b):
     """
-    Function used to detect burst detections.
+    Function used to detect burst times.
     """
     dim = dt.shape[0]
 
@@ -230,10 +229,13 @@ def time_indices(dt, var_hat, K, b):
 
         x = 0
         while (x < len(dt_temp)):
+
+            # Find indices that satisfy detection condition
             if (dt_temp[x] > K * var):
                 t_f = True
                 y = x
 
+                # Find end index
                 while(t_f == True):
                     y = y + 1
                     if (y >= len(dt_temp)):
@@ -243,6 +245,7 @@ def time_indices(dt, var_hat, K, b):
                     else:
                         t_f = False
 
+                # Append time index if its length is superior or equal to b samples
                 if (y - x >= b):
                     if (t == []):
                         t.append((x, y))
@@ -272,7 +275,7 @@ def time_indices(dt, var_hat, K, b):
 
 def cholesky(A, x_mat, N):
     """
-    Cholesky decomposition as is explained in the paper.
+    Cholesky decomposition as explained in the paper.
     """
     L = np.zeros([N, N])
     d = np.zeros(N)
@@ -352,6 +355,7 @@ def cholesky_reconstruct(frames, p, Nw, a_hat, times):
 
             if (l > 0):
 
+                # Cholesky reconstruction starts here.
                 b = np.zeros(p + 1)
                 B = np.zeros([l, l])
                 d = np.zeros(l)
@@ -386,35 +390,11 @@ def cholesky_reconstruct(frames, p, Nw, a_hat, times):
                         else:
                             d[i] = d[i] - b[abs(j)] * temp_frame[tim[i] - j]
 
-                #x_mat = np.zeros(l)
-
                 s_t = cholesky(B, d, l)
-
-                #if (x_mat_new == False):
-                #index = index + 1
-                #continue
-                """
-                L, D, perm = scipy.linalg.ldl(B, lower=True, hermitian=False, overwrite_a=True, check_finite=True)
-                #x_mat = scipy.linalg.ldl(B, lower=True, hermitian=True, overwrite_a=False, check_finite=True)
-
-                x_mat = np.linalg.solve(L, d)
-
-                L_t = np.transpose(L)
-                D_inv = np.linalg.inv(D)
-                D_x = np.matmul(D_inv, x_mat)
-
-                s_t = np.linalg.solve(L_t, D_x)
-                """
-                #s_t = np.linalg.solve(B, d)
-
-                #s_t = scipy.signal.savgol_filter(temp_frame[tup[0]:tup[1]], 11, 2, mode='nearest')
 
                 print(s_t.shape)
 
-                #temp_frame[tup[0]:tup[1]] = s_t[:]
-
-                #print(x_mat_new)
-
+                # Replace damaged samples with reconstructed ones.
                 for c in range(l):
                     temp_frame[tim[c]] = s_t[c]
 
@@ -441,8 +421,6 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
     wv = wavio.read(sound_file)
     rate = wv.rate
     sampwidth = wv.sampwidth
-    #arr = wv.data
-    #rate, sampwidth, arr = wavio.read(sound_file)
 
     wv_shape = wv.data.shape
     arr = np.zeros([wv.data.shape[0], wv.data.shape[1]])
@@ -450,10 +428,6 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
     for i in range(0, wv_shape[0], 1):
         for j in range(0, wv_shape[1], 1):
             arr[i, j] = wv.data[i, j]
-
-    #arr = arr[20000:40000, :]
-
-    #new_arr = np.zeros(arr.shape, dtype=float)
 
     # Number of channels and samples
     N = arr.shape[0]
@@ -530,7 +504,17 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
             # Step 5: reconstruct signal
             print("--> Reconstructing signal.")
 
+            #plt.plot(frames[164, :])
+
             frames = cholesky_reconstruct(frames, p, Nw, a_hat, times)
+
+            """
+            plt.plot(frames[164, :])
+            #plt.plot(x_vals, y_vals)
+            plt.xlabel("Time (samples)")
+            plt.ylabel("Amplitude")
+            plt.show()
+            """
 
             # Step 6: window every frame
             print("--> Windowing.")
@@ -538,6 +522,14 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
             w = window(Nw)
 
             for fr in range(frames.shape[0]):
+                """
+                if (fr == 164):
+                plt.plot(np.multiply(frames[fr, :], w))
+                #plt.plot(x_vals, y_vals)
+                plt.xlabel("Time (samples)")
+                plt.ylabel("Amplitude")
+                plt.show()
+                """
                 frames[fr, :] = np.multiply(frames[fr, :], w)
 
             # Step 7: Add frames up again for new signal!
@@ -567,7 +559,7 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
 def main():
     data, rate, sampwidth = remove_noise('Test_Samples/sampling_101.wav', 1.75, 20, 302, 2416, 1, 0.75)
 
-    wavio.write('new_cholesky.wav', data, rate, scale=None, sampwidth=sampwidth)
+    wavio.write('new_s101.wav', data, rate, scale=None, sampwidth=sampwidth)
 
 
 main()
