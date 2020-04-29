@@ -3,7 +3,7 @@ import scipy.linalg
 import scipy.signal
 import numpy as np
 import math
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import sys
 import wavio
 
@@ -55,17 +55,6 @@ def framing(signal, Nh, Nw):
     while (index < stop - 3 * Nh):
         temp = signal[index:index + Nw]
         frames.append(temp)
-        """
-        if (index == Nw * 10):
-        plt.plot(temp)
-        plt.show()
-        if (index == Nw * 10 + Nh):
-        plt.plot(temp)
-        plt.show()
-        if (index == Nw * 10 + Nh + Nh):
-        plt.plot(temp)
-        plt.show()
-        """
         index = index + Nh
     
     frames = np.asarray(frames)
@@ -459,22 +448,11 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
             signal, p_l, upper = padding(channel, Nw, Nh, N)
             print(p_l)
             print(upper)
-            """
-            plt.plot(signal)
-            plt.xlabel("Time (samples)")
-            plt.ylabel("Amplitude")
-            plt.show()
-            """
+
             # Step 2: Divide Signal into overlapping frames
             print("--> Dividing signal into overlapping frames.")
 
             frames = framing(signal, Nh, Nw)
-            """
-            plt.plot(frames[157, :])
-            plt.xlabel("Time (samples)")
-            plt.ylabel("Amplitude")
-            plt.show()
-            """
 
             # Step 3: Estimate the AR parameters
             print("--> Estimating AR parameters.")
@@ -486,16 +464,6 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
 
             dt = criterion(frames, Nw, p, a_hat)
 
-            x_vals = [0, Nw]
-            y_vals = [var_hat[157], var_hat[157]]
-
-            """
-            plt.plot(dt[157, :])
-            plt.plot(x_vals, y_vals)
-            plt.xlabel("Time (samples)")
-            plt.ylabel("Amplitude")
-            plt.show()
-            """
             # Step 4.5: detect corrupt signal time indices
             print("--> Detecting time indices for corrupt signals.")
 
@@ -508,28 +476,12 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
 
             frames = cholesky_reconstruct(frames, p, Nw, a_hat, times)
 
-            """
-            plt.plot(frames[164, :])
-            #plt.plot(x_vals, y_vals)
-            plt.xlabel("Time (samples)")
-            plt.ylabel("Amplitude")
-            plt.show()
-            """
-
             # Step 6: window every frame
             print("--> Windowing.")
 
             w = window(Nw)
 
             for fr in range(frames.shape[0]):
-                """
-                if (fr == 164):
-                plt.plot(np.multiply(frames[fr, :], w))
-                #plt.plot(x_vals, y_vals)
-                plt.xlabel("Time (samples)")
-                plt.ylabel("Amplitude")
-                plt.show()
-                """
                 frames[fr, :] = np.multiply(frames[fr, :], w)
 
             # Step 7: Add frames up again for new signal!
@@ -545,7 +497,7 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
             print(new_signal.shape)
             print(channel.shape)
 
-            channel = new_signal[Nw:p_l - upper - Nw]
+            channel[:] = new_signal[Nw:p_l - upper - Nw]
 
             print(channel.shape)
 
@@ -557,9 +509,47 @@ def remove_noise(sound_file, K, b, p, Nw, Niter, overlap):
 
 
 def main():
-    data, rate, sampwidth = remove_noise('Test_Samples/sampling_101.wav', 1.75, 20, 302, 2416, 1, 0.75)
+    """
+    print("Acapella!")
+    data, rate, sampwidth = remove_noise('Test_Samples/acapella.wav', 1.5, 1, 302, 2416, 2, 0.75)
+    wavio.write('Test_Results/res_acapella.wav', data, rate, scale=None, sampwidth=sampwidth)
 
-    wavio.write('new_s101.wav', data, rate, scale=None, sampwidth=sampwidth)
+    print("\nOpera!")
+    data, rate, sampwidth = remove_noise('Test_Samples/opera.wav', 1.5, 1, 302, 2416, 2, 0.75)
+    wavio.write('Test_Results/res_opera.wav', data, rate, scale=None, sampwidth=sampwidth)
+    
+    print("\nClassical!")
+    data, rate, sampwidth = remove_noise('Test_Samples/classical.wav', 1.5, 1, 302, 2416, 2, 0.75)
+    wavio.write('Test_Results/res_classical.wav', data, rate, scale=None, sampwidth=sampwidth)
+    
+    print("\nAura of Mistery!")
+    data, rate, sampwidth = remove_noise('Test_Samples/aura_of_mistery.wav', 1.5, 1, 302, 2416, 2, 0.75)
+    wavio.write('Test_Results/res_aura_of_mistery.wav', data, rate, scale=None, sampwidth=sampwidth)
+    
+    print("Gino Latino!")
+    data, rate, sampwidth = remove_noise('Test_Samples/gino_latino.wav', 1.5, 1, 302, 2416, 2, 0.75)
+    wavio.write('Test_Results/res_gino_latino.wav', data, rate, scale=None, sampwidth=sampwidth)
+
+    print("\nMoodymann!")
+    data, rate, sampwidth = remove_noise('Test_Samples/moodymann.wav', 1.75, 1, 302, 2416, 2, 0.75)
+    wavio.write('Test_Results/res_moodymann.wav', data, rate, scale=None, sampwidth=sampwidth)
+    
+    print("\Mystery Land!")
+    data, rate, sampwidth = remove_noise('Test_Samples/mystery_land.wav', 1.5, 1, 302, 2416, 2, 0.75)
+    wavio.write('Test_Results/res_mystery_land.wav', data, rate, scale=None, sampwidth=sampwidth)
+
+    print("\nSampling 101!")
+    data, rate, sampwidth = remove_noise('Test_Samples/sampling_101.wav', 1.5, 1, 302, 2416, 2, 0.75)
+    wavio.write('Test_Results/res_sampling_101.wav', data, rate, scale=None, sampwidth=sampwidth)
+    """
+    print("\nSex Tonight!")
+    data, rate, sampwidth = remove_noise('Test_Samples/sex_tonight.wav', 1.5, 1, 302, 2416, 2, 0.75)
+    wavio.write('Test_Results/res_sex_tonight.wav', data, rate, scale=None, sampwidth=sampwidth)
+
+    print("\nThe Timewriter!")
+    data, rate, sampwidth = remove_noise('Test_Samples/the_timewriter.wav', 1.5, 1, 302, 2416, 2, 0.75)
+    wavio.write('Test_Results/res_the_timewriter.wav', data, rate, scale=None, sampwidth=sampwidth)
+    
 
 
 main()
